@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 250px;
+      padding: 15px;
+      font-family: Arial, sans-serif;
+    }
+    .input-group {
+      margin: 10px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 5px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      padding: 8px 15px;
+      margin: 5px 5px 5px 0;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #start {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+    }
+    #stop {
+      background-color: #f44336;
+      color: white;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <h3>Auto Capture</h3>
+
+  <div class="input-group">
+    <label for="pageCount">要擷取的頁數：</label>
+    <input type="number" id="pageCount" min="1" value="10" placeholder="輸入頁數">
+  </div>
+
+  <div class="input-group">
+    <label>
+      <input type="checkbox" id="captureAll">
+      擷取到最後（直到無法翻頁）
+    </label>
+  </div>
+
+  <div class="input-group">
+    <label>
+      <input type="checkbox" id="mergeToPdf">
+      完成後合併成 PDF 檔案
+    </label>
+  </div>
+
+  <button id="start">開始</button>
+  <button id="stop">停止</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
