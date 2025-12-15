@@ -47,6 +47,7 @@ const captureMutex = new Mutex(); // ✨ v2.0：使用 Mutex 取代 isProcessing
 let maxPages = 10; // 預設擷取 10 頁
 let captureAll = false; // 是否擷取到最後
 let mergeToPdf = false; // 是否合併成 PDF
+let flipDirection = 'right'; // ✨ v2.1：翻頁方向（'right' 或 'left'）
 let capturedImages = []; // 儲存所有擷取的圖片 data URLs
 let currentFolder = ''; // 當前擷取的資料夾名稱（帶時間戳記）
 
@@ -72,16 +73,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     captureAll = msg.captureAll || false; // 是否擷取到最後
     maxPages = msg.maxPages || 10; // 接收使用者設定的頁數，預設 10 頁
     mergeToPdf = msg.mergeToPdf || false; // 是否合併成 PDF
+    flipDirection = msg.flipDirection || 'right'; // ✨ v2.1：接收翻頁方向，預設向右
     capturedImages = []; // 重置圖片陣列
 
     // 生成帶時間戳記的資料夾名稱（使用本地時間）
     const timestamp = getLocalTimestamp();
     currentFolder = `auto-capture-${timestamp}`;
 
+    const directionText = flipDirection === 'left' ? '向左 ←' : '向右 →';
     if (captureAll) {
-      console.log(`Starting capture, mode: 擷取到最後, Merge to PDF: ${mergeToPdf}, Folder: ${currentFolder}, sending BEGIN to content script`);
+      console.log(`Starting capture, mode: 擷取到最後, Merge to PDF: ${mergeToPdf}, Flip: ${directionText}, Folder: ${currentFolder}`);
     } else {
-      console.log(`Starting capture, max pages: ${maxPages}, Merge to PDF: ${mergeToPdf}, Folder: ${currentFolder}, sending BEGIN to content script`);
+      console.log(`Starting capture, max pages: ${maxPages}, Merge to PDF: ${mergeToPdf}, Flip: ${directionText}, Folder: ${currentFolder}`);
     }
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs[0]) {
@@ -90,7 +93,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // 先嘗試發送訊息，如果失敗則手動注入 content script
         try {
-          await chrome.tabs.sendMessage(tabId, { type: "BEGIN" });
+          await chrome.tabs.sendMessage(tabId, { type: "BEGIN", flipDirection: flipDirection });
           console.log("BEGIN message sent successfully");
         } catch (error) {
           console.log("Content script not loaded, injecting manually...");
@@ -104,7 +107,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // 等待 content script 初始化
             await new Promise(resolve => setTimeout(resolve, 500));
             // 再次嘗試發送訊息
-            await chrome.tabs.sendMessage(tabId, { type: "BEGIN" });
+            await chrome.tabs.sendMessage(tabId, { type: "BEGIN", flipDirection: flipDirection });
             console.log("BEGIN message sent after manual injection");
           } catch (injectError) {
             console.error("Failed to inject content script:", injectError.message);

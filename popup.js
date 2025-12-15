@@ -21,13 +21,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const captureAll = captureAllCheckbox.checked;
     const mergeToPdf = mergeToPdfCheckbox.checked;
 
+    // 取得翻頁方向
+    const flipDirection = document.querySelector('input[name="flipDirection"]:checked').value;
+    console.log("Flip direction:", flipDirection);
+
     if (captureAll) {
       // 擷取到最後模式
-      console.log("Capture mode: Until end, Merge to PDF:", mergeToPdf);
+      console.log("Capture mode: Until end, Merge to PDF:", mergeToPdf, ", Flip direction:", flipDirection);
       chrome.runtime.sendMessage({
         type: "START_CAPTURE",
         captureAll: true,
-        mergeToPdf: mergeToPdf
+        mergeToPdf: mergeToPdf,
+        flipDirection: flipDirection
       });
     } else {
       // 指定頁數模式
@@ -38,11 +43,12 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      console.log("Capture mode: Max pages:", maxPages, ", Merge to PDF:", mergeToPdf);
+      console.log("Capture mode: Max pages:", maxPages, ", Merge to PDF:", mergeToPdf, ", Flip direction:", flipDirection);
       chrome.runtime.sendMessage({
         type: "START_CAPTURE",
         maxPages: maxPages,
-        mergeToPdf: mergeToPdf
+        mergeToPdf: mergeToPdf,
+        flipDirection: flipDirection
       });
     }
   });

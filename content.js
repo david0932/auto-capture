@@ -2,6 +2,7 @@ let running = false;
 let delay = 500;  // 翻頁間隔（已優化為 500ms，因為是完全串行執行）
 let consecutiveFailures = 0;  // 連續翻頁失敗次數
 const MAX_FAILURES = 8;  // 連續失敗 8 次就判定為最後一頁（進一步增加容錯）
+let flipDirection = 'right';  // ✨ v2.1：翻頁方向（'right' 或 'left'）
 
 // 防止在 iframe 中重複執行
 if (window === window.top) {
@@ -13,6 +14,11 @@ if (window === window.top) {
       console.log("Starting auto capture loop");
       running = true;
       consecutiveFailures = 0;  // 重置失敗計數器
+
+      // ✨ v2.1：接收翻頁方向
+      flipDirection = msg.flipDirection || 'right';
+      const directionText = flipDirection === 'left' ? '向左 ←' : '向右 →';
+      console.log(`✨ 翻頁方向設定為：${directionText}`);
 
       // 等待 1 秒讓 iframe 完全載入
       console.log("Waiting 1 second for iframes to load...");
@@ -234,13 +240,18 @@ async function flipPage() {
               "URL:", stateBefore.url,
               "Scroll:", stateBefore.scroll);
 
-  // 使用鍵盤右方向鍵翻頁
-  console.log("⌨️ Triggering keyboard ArrowRight...");
+  // ✨ v2.1：根據翻頁方向使用不同的按鍵
+  const isLeftFlip = flipDirection === 'left';
+  const arrowKey = isLeftFlip ? 'ArrowLeft' : 'ArrowRight';
+  const keyCode = isLeftFlip ? 37 : 39;  // ArrowLeft: 37, ArrowRight: 39
+  const directionSymbol = isLeftFlip ? '←' : '→';
+
+  console.log(`⌨️ Triggering keyboard ${arrowKey} ${directionSymbol}...`);
   const keyEvent = new KeyboardEvent("keydown", {
-    key: "ArrowRight",
-    code: "ArrowRight",
-    keyCode: 39,
-    which: 39,
+    key: arrowKey,
+    code: arrowKey,
+    keyCode: keyCode,
+    which: keyCode,
     bubbles: true,
     cancelable: true
   });
