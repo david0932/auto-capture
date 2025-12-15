@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Auto Page Capture",
-  "version": "1.3",
-  "description": "Auto screenshot + auto flip + merge to PDF",
+  "version": "2.0",
+  "description": "Auto screenshot + auto flip + merge to PDF (v2.0: Zero page loss)",
   "permissions": ["activeTab", "tabs", "downloads", "scripting"],
   "background": {
     "service_worker": "background.js"

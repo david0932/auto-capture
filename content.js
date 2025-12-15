@@ -1,7 +1,7 @@
 let running = false;
-let delay = 3000;  // 你指定的 3 秒
+let delay = 500;  // 翻頁間隔（已優化為 500ms，因為是完全串行執行）
 let consecutiveFailures = 0;  // 連續翻頁失敗次數
-const MAX_FAILURES = 3;  // 連續失敗 3 次就判定為最後一頁
+const MAX_FAILURES = 8;  // 連續失敗 8 次就判定為最後一頁（進一步增加容錯）
 
 // 防止在 iframe 中重複執行
 if (window === window.top) {
@@ -13,19 +13,34 @@ if (window === window.top) {
       console.log("Starting auto capture loop");
       running = true;
       consecutiveFailures = 0;  // 重置失敗計數器
+
       // 等待 1 秒讓 iframe 完全載入
       console.log("Waiting 1 second for iframes to load...");
       await sleep(1000);
 
-      // 先擷取第一頁（當前頁面）
-      console.log("Capturing first page before flipping");
-      chrome.runtime.sendMessage({ type: "CAPTURE_PAGE" });
+      // 先擷取第一頁（當前頁面）並等待完成
+      console.log("📸 開始擷取第一頁（當前頁面）");
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "CAPTURE_PAGE" });
+        if (response && response.ok) {
+          console.log(`✅ 第一頁擷取成功，頁碼：${response.pageNumber}`);
+        } else {
+          const errorMsg = response?.error || "未知錯誤";
+          console.error(`❌ 第一頁擷取失敗: ${errorMsg}`);
+          console.error(`⚠️ 無法繼續，停止流程`);
+          running = false;
+          return;
+        }
+      } catch (error) {
+        console.error(`❌ 第一頁擷取發生異常:`, error);
+        running = false;
+        return;
+      }
 
-      // 等待一下讓第一頁擷取完成
-      await sleep(1000);
-
-      // 然後開始翻頁循環
-      startLoop();
+      // 第一頁擷取完成後，開始翻頁循環
+      console.log("⏳ 第一頁完成，準備開始翻頁循環...");
+      await sleep(500);  // 短暫等待
+      await startLoop();  // 使用 while 循環（非遞迴）
     }
     if (msg.type === "STOP") {
       console.log("Stopping auto capture");
@@ -87,43 +102,112 @@ function getReaderFrame() {
   return window;
 }
 
+// ✨ v2.0 重構：使用 while 循環取代遞迴，避免堆疊溢出
 async function startLoop() {
-  console.log("startLoop called, running:", running);
-  if (!running) return;
+  console.log("🔄 [v2.0] startLoop 開始執行（使用 while 循環）");
 
-  // Step 1: 翻頁
-  console.log("Attempting to flip page...");
-  const flipped = await flipPage();
+  // 使用 while 循環取代遞迴調用
+  while (running) {
+    // Step 1: 嘗試翻頁
+    console.log("📄 Attempting to flip page...");
+    const flipped = await flipPage();
 
-  if (!flipped) {
-    consecutiveFailures++;
-    console.log(`翻頁失敗 (${consecutiveFailures}/${MAX_FAILURES})`);
+    if (!flipped) {
+      // 翻頁失敗處理
+      consecutiveFailures++;
+      console.log(`⚠️ 翻頁失敗 (${consecutiveFailures}/${MAX_FAILURES})`);
 
-    if (consecutiveFailures >= MAX_FAILURES) {
-      console.log(`連續 ${MAX_FAILURES} 次翻頁失敗，判定已到達最後一頁，中止流程`);
-      chrome.runtime.sendMessage({ type: "STOP_CAPTURE" }); // 通知 background 停止
+      if (consecutiveFailures >= MAX_FAILURES) {
+        // 達到最大失敗次數，判定為最後一頁
+        console.log(`❌ 連續 ${MAX_FAILURES} 次翻頁失敗，判定已到達最後一頁`);
+        chrome.runtime.sendMessage({ type: "AUTO_STOP_CAPTURE" });
+        running = false;
+        consecutiveFailures = 0;
+        break;  // 退出循環（取代 return）
+      }
+
+      // 還有重試機會，增加等待時間後繼續
+      const retryDelay = delay + (consecutiveFailures * 500);
+      console.log(`🔄 還有 ${MAX_FAILURES - consecutiveFailures} 次重試機會，等待 ${retryDelay}ms 後重試`);
+      await sleep(retryDelay);
+      continue;  // 跳過本次迭代，繼續下一次循環
+    }
+
+    // Step 2: 翻頁成功，重置失敗計數
+    consecutiveFailures = 0;
+    console.log("✅ 翻頁成功，等待 500ms 讓頁面穩定");
+
+    // 等待頁面穩定
+    await sleep(500);
+
+    // Step 3: 發送擷取請求
+    let captureSuccess = false;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "CAPTURE_PAGE" });
+      if (response && response.ok) {
+        console.log(`📸 擷取成功，頁碼：${response.pageNumber}`);
+        captureSuccess = true;
+      } else {
+        const errorMsg = response?.error || "未知錯誤";
+        console.error(`❌ 擷取失敗（已重試 ${response?.retries || 5} 次）: ${errorMsg}`);
+        console.error(`完整 response:`, response);
+      }
+    } catch (error) {
+      console.error(`❌ 擷取請求發生異常:`, error.message || error);
+      console.error(`異常詳情:`, error);
+    }
+
+    // Step 4: 檢查擷取是否成功
+    if (!captureSuccess) {
+      console.error(`🛑 擷取失敗，停止流程以避免缺頁`);
+      console.error(`建議：請檢查瀏覽器視窗是否在前景、標籤頁是否正確`);
       running = false;
-      consecutiveFailures = 0;
-      return;
+      chrome.runtime.sendMessage({ type: "STOP_CAPTURE" });
+      break;  // 退出循環
     }
 
-    // 還沒達到上限，繼續嘗試
-    console.log("繼續嘗試翻頁...");
+    // Step 5: 等待後進入下一次迭代
     if (running) {
-      setTimeout(startLoop, delay);
+      console.log(`⏳ 等待 ${delay}ms 後翻下一頁`);
+      await sleep(delay);
     }
-    return;
   }
 
-  // Step 2: 翻頁成功 → 重置失敗計數 → 請 background 儲存截圖
-  consecutiveFailures = 0;
-  console.log("Page flipped successfully, requesting capture");
-  chrome.runtime.sendMessage({ type: "CAPTURE_PAGE" });
+  console.log("🏁 startLoop 循環結束");
+}
 
-  // Step 3: 等待 delay 秒 → 下一輪
-  if (running) {
-    console.log(`Waiting ${delay}ms before next page...`);
-    setTimeout(startLoop, delay);
+// ✨ v2.0 改進：使用雜湊值檢測頁面變化，更準確判斷翻頁成功
+function getPageState(win) {
+  try {
+    const html = win.document.body.innerHTML;
+    const url = win.location.href;
+    const scroll = `${win.scrollX},${win.scrollY}`;
+
+    // 提取可見文字內容（更準確）
+    const visibleText = win.document.body.innerText || '';
+
+    // 簡單的字串雜湊函數（使用 djb2 演算法）
+    function hashString(str) {
+      let hash = 5381;
+      for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) + hash) + str.charCodeAt(i); // hash * 33 + c
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      return hash;
+    }
+
+    return {
+      htmlHash: hashString(html),
+      htmlLength: html.length,
+      textHash: hashString(visibleText.substring(0, 5000)), // 只取前 5000 字元避免過慢
+      textLength: visibleText.length,
+      url: url,
+      scroll: scroll,
+      imageCount: win.document.images.length
+    };
+  } catch (error) {
+    console.error("❌ 無法獲取頁面狀態:", error);
+    return null;
   }
 }
 
@@ -134,15 +218,24 @@ async function flipPage() {
 
   // 如果視窗大小為 0，無法翻頁
   if (readerWin.innerWidth === 0 || readerWin.innerHeight === 0) {
-    console.error("Window size is 0, cannot flip page");
+    console.error("❌ Window size is 0, cannot flip page");
     return false;
   }
 
-  const before = readerWin.document.body.innerHTML.length;
-  console.log("HTML length before flip:", before);
+  // 記錄翻頁前的狀態（使用雜湊值）
+  const stateBefore = getPageState(readerWin);
+  if (!stateBefore) {
+    console.error("❌ 無法獲取翻頁前的頁面狀態");
+    return false;
+  }
 
-  // 第一招：在 document.body 上觸發鍵盤事件
-  console.log("Trying keyboard ArrowRight on document.body...");
+  console.log("Before flip - HTML hash:", stateBefore.htmlHash,
+              "Text hash:", stateBefore.textHash,
+              "URL:", stateBefore.url,
+              "Scroll:", stateBefore.scroll);
+
+  // 使用鍵盤右方向鍵翻頁
+  console.log("⌨️ Triggering keyboard ArrowRight...");
   const keyEvent = new KeyboardEvent("keydown", {
     key: "ArrowRight",
     code: "ArrowRight",
@@ -153,45 +246,43 @@ async function flipPage() {
   });
   readerWin.document.body.dispatchEvent(keyEvent);
 
-  await sleep(500);
+  // 等待頁面更新（優化為 1.5 秒）
+  await sleep(1500);
 
-  let afterKB = readerWin.document.body.innerHTML.length;
-  console.log("HTML length after keyboard:", afterKB, "Changed:", afterKB !== before);
-  if (afterKB !== before) {
-    console.log("✓ 鍵盤翻頁成功 (HTML changed)");
-    return true;
-  }
-
-  // 第二招：滑鼠點擊右側
-  const x = Math.floor(readerWin.innerWidth * 0.85);
-  const y = Math.floor(readerWin.innerHeight * 0.5);
-  console.log(`Trying click at position: (${x}, ${y})`);
-
-  const element = readerWin.document.elementFromPoint(x, y);
-  console.log("Element at click position:", element ? element.tagName : "null", element);
-
-  if (element) {
-    element.click();
-    console.log("Clicked element");
-
-    // 等待更長時間讓頁面有時間改變（從 500ms 增加到 1000ms）
-    await sleep(1000);
-
-    const afterClick = readerWin.document.body.innerHTML.length;
-    console.log("HTML length after click:", afterClick, "Changed:", afterClick !== before);
-
-    if (afterClick !== before) {
-      console.log("✓ 滑鼠翻頁成功 (HTML changed)");
-      return true;
-    }
-
-    // HTML 沒變 → 可能已經到最後一頁
-    console.log("✗ 滑鼠點擊後 HTML 沒有改變，可能已到最後一頁");
+  // 檢查翻頁後的狀態
+  const stateAfter = getPageState(readerWin);
+  if (!stateAfter) {
+    console.error("❌ 無法獲取翻頁後的頁面狀態");
     return false;
   }
 
-  // 兩種方式都失敗 → 返回 false
-  console.log("✗ Both flip methods failed");
+  console.log("After flip - HTML hash:", stateAfter.htmlHash,
+              "Text hash:", stateAfter.textHash,
+              "URL:", stateAfter.url,
+              "Scroll:", stateAfter.scroll);
+
+  // ✨ v2.0 改進：使用多維度檢測，更準確判斷翻頁成功
+  const htmlHashChanged = stateAfter.htmlHash !== stateBefore.htmlHash;
+  const textHashChanged = stateAfter.textHash !== stateBefore.textHash;
+  const urlChanged = stateAfter.url !== stateBefore.url;
+  const scrollChanged = stateAfter.scroll !== stateBefore.scroll;
+  const imageCountChanged = stateAfter.imageCount !== stateBefore.imageCount;
+
+  // 文字內容變化是最可靠的指標
+  const hasSignificantChange = textHashChanged || urlChanged ||
+                                (htmlHashChanged && imageCountChanged);
+
+  if (hasSignificantChange) {
+    console.log(`✓ 翻頁成功 (TextHash: ${textHashChanged ? '✓' : '✗'}, ` +
+                `URL: ${urlChanged ? '✓' : '✗'}, ` +
+                `HTML: ${htmlHashChanged ? '✓' : '✗'}, ` +
+                `Images: ${imageCountChanged ? '✓' : '✗'}, ` +
+                `Scroll: ${scrollChanged ? '✓' : '✗'})`);
+    return true;
+  }
+
+  // 沒有顯著變化 → 翻頁失敗
+  console.log("✗ 翻頁失敗 (no significant change detected)");
   return false;
 }
 
